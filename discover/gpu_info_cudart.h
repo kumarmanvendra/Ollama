@@ -123,6 +123,7 @@ typedef struct cudaDeviceProp {
 typedef struct cudart_handle {
   void *handle;
   uint16_t verbose;
+  const char* (*cudaGetErrorString)(cudartReturn_t error);
   cudartReturn_t (*cudaSetDevice)(int device);
   cudartReturn_t (*cudaDeviceSynchronize)(void);
   cudartReturn_t (*cudaDeviceReset)(void);
@@ -140,7 +141,7 @@ typedef struct cudart_init_resp {
 } cudart_init_resp_t;
 
 void cudart_init(char *cudart_lib_path, cudart_init_resp_t *resp);
-void cudart_bootstrap(cudart_handle_t ch, int device_id, mem_info_t *resp);
+cudartReturn_t cudart_bootstrap(cudart_handle_t ch, int device_id, mem_info_t *resp);
 // TODO - if we keep this library longer term, add cudart_get_free
 void cudart_release(cudart_handle_t ch);
 

@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include "gpu_info_nvcuda.h"
+const char *unknown = "unknown";
 
 void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
   LOG(resp->ch.verbose, "initializing %s\n", nvcuda_lib_path);
@@ -12,12 +13,13 @@ void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
   const int buflen = 256;
   char buf[buflen + 1];
   int i;
+  const char *err;
 
   struct lookup {
     char *s;
     void **p;
   } l[] = {
-   
+      {"cuGetErrorString", (void *)&resp->ch.cuGetErrorString},   
       {"cuInit", (void *)&resp->ch.cuInit},
       {"cuDriverGetVersion", (void *)&resp->ch.cuDriverGetVersion},
       {"cuDeviceGetCount", (void *)&resp->ch.cuDeviceGetCount},
@@ -64,10 +66,14 @@ void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
   LOG(resp->ch.verbose, "calling cuInit\n");
   ret = (*resp->ch.cuInit)(0);
   if (ret != CUDA_SUCCESS) {
-    LOG(resp->ch.verbose, "cuInit err: %d\n", ret);
+    (*resp->ch.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(resp->ch.verbose, "cuInit err: %s (%d)\n", err, ret);
     UNLOAD_LIBRARY(resp->ch.handle);
     resp->ch.handle = NULL;
-    snprintf(buf, buflen, "cuda driver library init failure: %d", ret);
+    snprintf(buf, buflen, "cuda driver library init failure: %s (%d)", err, ret);
     resp->err = strdup(buf);
     resp->cudaErr = ret;
     return;
@@ -81,7 +87,11 @@ void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
   LOG(resp->ch.verbose, "calling cuDriverGetVersion\n");
   ret = (*resp->ch.cuDriverGetVersion)(&version);
   if (ret != CUDA_SUCCESS) {
-    LOG(resp->ch.verbose, "cuDriverGetVersion failed: %d\n", ret);
+    (*resp->ch.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(resp->ch.verbose, "cuDriverGetVersion failed: %s (%d)\n", err, ret);
   } else {
     LOG(resp->ch.verbose, "raw version 0x%x\n", version);
     resp->ch.driver_major = version / 1000;
@@ -92,7 +102,11 @@ void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
   LOG(resp->ch.verbose, "calling cuDeviceGetCount\n");
   ret = (*resp->ch.cuDeviceGetCount)(&resp->num_devices);
   if (ret != CUDA_SUCCESS) {
-    LOG(resp->ch.verbose, "cuDeviceGetCount err: %d\n", ret);
+    (*resp->ch.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(resp->ch.verbose, "cuDeviceGetCount err: %s (%d)\n", err, ret);
     UNLOAD_LIBRARY(resp->ch.handle);
     resp->ch.handle = NULL;
     snprintf(buf, buflen, "unable to get device count: %d", ret);
@@ -104,7 +118,7 @@ void nvcuda_init(char *nvcuda_lib_path, nvcuda_init_resp_t *resp) {
 }
 
 const int buflen = 256;
-void nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
+CUresult nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
   resp->err = NULL;
   nvcudaMemory_t memInfo = {0,0};
   CUresult ret;
@@ -112,28 +126,41 @@ void nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
   CUcontext ctx = NULL;
   char buf[buflen + 1];
   CUuuid uuid = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  const char *err;
 
   if (h.handle == NULL) {
     resp->err = strdup("cuda driver library handle isn't initialized");
-    return;
+    return CUDA_ERROR_INVALID_VALUE;
   }
 
   ret = (*h.cuDeviceGet)(&device, i);
   if (ret != CUDA_SUCCESS) {
-    snprintf(buf, buflen, "cuda driver library device failed to initialize");
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    snprintf(buf, buflen, "cuda driver library device failed to initialize: %s (%d)", err, ret);
     resp->err = strdup(buf);
-    return;
+    return ret;
   }
 
   int major = 0;
   int minor = 0;
   ret = (*h.cuDeviceGetAttribute)(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
   if (ret != CUDA_SUCCESS) {
-    LOG(h.verbose, "[%d] device major lookup failure: %d\n", i, ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(h.verbose, "[%d] device major lookup failure: %s (%d)\n", i, err, ret);
   } else {
     ret = (*h.cuDeviceGetAttribute)(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
     if (ret != CUDA_SUCCESS) {
-      LOG(h.verbose, "[%d] device minor lookup failure: %d\n", i, ret);
+      (*h.cuGetErrorString)(ret, &err);
+      if (err == NULL) {
+        err = unknown;
+      }
+      LOG(h.verbose, "[%d] device minor lookup failure: %s (%d)\n", i, err, ret);
     } else {
       resp->minor = minor;  
       resp->major = major;  
@@ -142,7 +169,11 @@ void nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
 
   ret = (*h.cuDeviceGetUuid)(&uuid, device);
   if (ret != CUDA_SUCCESS) {
-    LOG(h.verbose, "[%d] device uuid lookup failure: %d\n", i, ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(h.verbose, "[%d] device uuid lookup failure: %s (%d)\n", i, err, ret);
     snprintf(&resp->gpu_id[0], GPU_ID_LEN, "%d", i);
   } else {
     // GPU-d110a105-ac29-1d54-7b49-9c90440f215b
@@ -169,25 +200,41 @@ void nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
 
   ret = (*h.cuDeviceGetName)(&resp->gpu_name[0], GPU_NAME_LEN, device);
   if (ret != CUDA_SUCCESS) {
-    LOG(h.verbose, "[%d] device name lookup failure: %d\n", i, ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(h.verbose, "[%d] device name lookup failure: %s (%d)\n", i, err, ret);
     resp->gpu_name[0] = '\0';
   }
 
   // To get memory we have to set (and release) a context
   ret = (*h.cuCtxCreate_v3)(&ctx, NULL, 0, 0, device);
   if (ret != CUDA_SUCCESS) {
-    snprintf(buf, buflen, "cuda driver library failed to get device context %d", ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    if (ret == CUDA_ERROR_DEVICES_UNAVAILABLE) {
+      snprintf(buf, buflen, "cuda devices are busy: %s (%d)", err, ret);
+    } else {
+      snprintf(buf, buflen, "cuda driver library failed to get device context: %s (%d)", err, ret);
+    }
     resp->err = strdup(buf);
-    return;
+    return ret;
   }
 
   ret = (*h.cuMemGetInfo_v2)(&memInfo.free, &memInfo.total);
   if (ret != CUDA_SUCCESS) {
-    snprintf(buf, buflen, "cuda driver library device memory info lookup failure %d", ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    snprintf(buf, buflen, "cuda driver library device memory info lookup failure %s (%d)", err, ret);
     resp->err = strdup(buf);
     // Best effort on failure...
     (*h.cuCtxDestroy)(ctx);
-    return;
+    return ret;
   }
 
   resp->total = memInfo.total;
@@ -201,43 +248,66 @@ void nvcuda_bootstrap(nvcuda_handle_t h, int i, mem_info_t *resp) {
 
   ret = (*h.cuCtxDestroy)(ctx);
   if (ret != CUDA_SUCCESS) {
-    LOG(1, "cuda driver library failed to release device context %d", ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(1, "cuda driver library failed to release device context %s (%d)\n", err, ret);
   }
+  return ret;
 }
 
-void nvcuda_get_free(nvcuda_handle_t h, int i, uint64_t *free, uint64_t *total) {
+CUresult nvcuda_get_free(nvcuda_handle_t h, int i, uint64_t *free, uint64_t *total) {
   CUresult ret;
   CUcontext ctx = NULL;
   CUdevice device = -1;
   *free = 0;
   *total = 0;
+  const char *err;
 
   ret = (*h.cuDeviceGet)(&device, i);
   if (ret != CUDA_SUCCESS) {
-    LOG(1, "cuda driver library device failed to initialize");
-    return;
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(1, "cuda driver library device failed to initialize: %s (%d)\n", err, ret);
+    return ret;
   }
 
 
   // To get memory we have to set (and release) a context
   ret = (*h.cuCtxCreate_v3)(&ctx, NULL, 0, 0, device);
   if (ret != CUDA_SUCCESS) {
-    LOG(1, "cuda driver library failed to get device context %d", ret);
-    return;
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(1, "cuda driver library failed to get device context: %s (%d)\n", err, ret);
+    return ret;
   }
 
   ret = (*h.cuMemGetInfo_v2)(free, total);
   if (ret != CUDA_SUCCESS) {
-    LOG(1, "cuda driver library device memory info lookup failure %d", ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(1, "cuda driver library device memory info lookup failure: %s (%d)\n", err, ret);
     // Best effort on failure...
     (*h.cuCtxDestroy)(ctx);
-    return;
+    return ret;
   }
 
   ret = (*h.cuCtxDestroy)(ctx);
   if (ret != CUDA_SUCCESS) {
-    LOG(1, "cuda driver library failed to release device context %d", ret);
+    (*h.cuGetErrorString)(ret, &err);
+    if (err == NULL) {
+      err = unknown;
+    }
+    LOG(1, "cuda driver library failed to release device context: %s (%d)\n", err, ret);
   }
+  return ret;
 }
 
 void nvcuda_release(nvcuda_handle_t h) {
