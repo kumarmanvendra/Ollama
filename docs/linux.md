@@ -183,3 +183,8 @@ sudo rm -r /usr/share/ollama
 sudo userdel ollama
 sudo groupdel ollama
 ```
+
+Remove the config
+```bash
+sudo rm -rf /etc/ollama
+```
